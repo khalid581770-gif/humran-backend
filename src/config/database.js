@@ -1,24 +1,17 @@
-// ============================================================
-// الاتصال بقاعدة البيانات MySQL
-// نستخدم Connection Pool لتحسين الأداء
-// ============================================================
 const mysql = require('mysql2/promise');
 
 const pool = mysql.createPool({
-  ssl: process.env.DB_SSL === 'true' ? {rejectUnauthorized: false} : false,
-  host:               process.env.DB_HOST     || 'localhost',
-  port:              11213,
-  user:               process.env.DB_USER     || 'root',
-  password:           process.env.DB_PASSWORD || '',
-  database:           process.env.DB_NAME     || 'humran_training',
-  charset:            'utf8mb4',
+  host:     process.env.DB_HOST     || 'localhost',
+  port:     11213,
+  user:     process.env.DB_USER     || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME     || 'defaultdb',
+  charset:  'utf8mb4',
+  ssl:      { rejectUnauthorized: false },
   waitForConnections: true,
-  connectionLimit:    10,
-  queueLimit:         0,
-  timezone:           '+03:00', // توقيت السعودية
+  connectionLimit: 10,
 });
 
-// اختبار الاتصال عند بدء التشغيل
 async function testConnection() {
   try {
     const conn = await pool.getConnection();
@@ -31,4 +24,3 @@ async function testConnection() {
 }
 
 module.exports = { pool, testConnection };
-
