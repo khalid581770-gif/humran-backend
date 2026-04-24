@@ -1,11 +1,10 @@
-cat > src/config/database.js <<'EOF'
 const { Pool } = require('pg');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false
-  }
+    rejectUnauthorized: false,
+  },
 });
 
 async function testConnection() {
@@ -20,4 +19,3 @@ async function testConnection() {
 }
 
 module.exports = { pool, testConnection };
-EOF
