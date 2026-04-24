@@ -59,14 +59,11 @@ app.use(errorHandler);
 async function start() {
   await testConnection();
 
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     logger.info('Server started', { port: PORT, env: process.env.NODE_ENV });
-    console.log(`🚀 السيرفر يعمل على:  http://localhost:${PORT}`);
-    console.log(`📡 API متاحة على:     http://localhost:${PORT}/api`);
-    console.log(`🏥 Health Check:      http://localhost:${PORT}/health`);
+    console.log(`🚀 Server running on port ${PORT}`);
   });
 
-  // تشغيل جدولة التنبيهات التلقائية
   if (process.env.NODE_ENV !== 'test') {
     startNotificationScheduler();
   }
