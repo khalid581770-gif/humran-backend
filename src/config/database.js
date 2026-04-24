@@ -1,3 +1,4 @@
+cat > src/config/database.js <<'EOF'
 const { Pool } = require('pg');
 
 const pool = new Pool({
@@ -10,7 +11,7 @@ const pool = new Pool({
 async function testConnection() {
   try {
     const client = await pool.connect();
-    console.log('✅ تم الاتصال بقاعدة البيانات (PostgreSQL)');
+    console.log('✅ تم الاتصال بقاعدة البيانات PostgreSQL');
     client.release();
   } catch (err) {
     console.error('❌ فشل الاتصال بقاعدة البيانات:', err.message);
@@ -19,3 +20,4 @@ async function testConnection() {
 }
 
 module.exports = { pool, testConnection };
+EOF
