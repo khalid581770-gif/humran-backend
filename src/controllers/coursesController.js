@@ -1,11 +1,8 @@
 // ============================================================
-// Controller: إدارة الدورات التدريبية
+// Controller: إدارة الدورات التدريبية - PostgreSQL
 // ============================================================
 const { pool } = require('../config/database');
 
-// ─────────────────────────────────────────
-// GET /api/courses — جلب جميع الدورات
-// ─────────────────────────────────────────
 async function getAll(req, res, next) {
   try {
     const { status, month, year, search } = req.query;
@@ -19,43 +16,44 @@ async function getAll(req, res, next) {
       WHERE 1=1
     `;
     const params = [];
+    let n = 1;
 
-    if (status)  { sql += ' AND c.status = ?';                           params.push(status); }
-    if (month)   { sql += ' AND MONTH(c.start_date) = ?';                params.push(month);  }
-    if (year)    { sql += ' AND YEAR(c.start_date) = ?';                 params.push(year);   }
-    if (search)  { sql += ' AND c.name LIKE ?';                          params.push(`%${search}%`); }
+    if (status) { sql += ` AND c.status = $${n++}`; params.push(status); }
+    if (month) { sql += ` AND EXTRACT(MONTH FROM c.start_date) = $${n++}`; params.push(month); }
+    if (year) { sql += ` AND EXTRACT(YEAR FROM c.start_date) = $${n++}`; params.push(year); }
+    if (search) { sql += ` AND c.name ILIKE $${n++}`; params.push(`%${search}%`); }
 
-    sql += ' GROUP BY c.id ORDER BY c.start_date ASC';
+    sql += `
+      GROUP BY c.id, i.name, i.contact_person
+      ORDER BY c.start_date ASC
+    `;
 
-    const [rows] = await pool.query(sql, params);
-    res.json(rows);
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
   } catch (err) { next(err); }
 }
 
-// ─────────────────────────────────────────
-// GET /api/courses/:id — دورة واحدة
-// ─────────────────────────────────────────
 async function getOne(req, res, next) {
   try {
-    const [rows] = await pool.query(`
+    const result = await pool.query(`
       SELECT c.*, i.name AS institute_name, i.contact_person,
              COALESCE(SUM(p.amount_paid), 0) AS paid_amount,
              c.total_amount - COALESCE(SUM(p.amount_paid), 0) AS remaining_amount
       FROM courses c
       LEFT JOIN institutes i ON c.institute_id = i.id
       LEFT JOIN payments p ON p.course_id = c.id
-      WHERE c.id = ?
-      GROUP BY c.id
+      WHERE c.id = $1
+      GROUP BY c.id, i.name, i.contact_person
     `, [req.params.id]);
 
-    if (rows.length === 0) return res.status(404).json({ message: 'الدورة غير موجودة' });
-    res.json(rows[0]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'الدورة غير موجودة' });
+    }
+
+    res.json(result.rows[0]);
   } catch (err) { next(err); }
 }
 
-// ─────────────────────────────────────────
-// POST /api/courses — إضافة دورة
-// ─────────────────────────────────────────
 async function create(req, res, next) {
   try {
     const {
@@ -68,31 +66,30 @@ async function create(req, res, next) {
       return res.status(400).json({ message: 'اسم الدورة والتاريخ مطلوبان' });
     }
 
-    const [result] = await pool.query(`
+    const result = await pool.query(`
       INSERT INTO courses
         (name, start_date, end_date, start_time, location, mode,
          daily_rate, total_days, status, institute_id, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING id
     `, [
       name, start_date, end_date, start_time || null,
-      location, mode || 'أونلاين', daily_rate || 0,
+      location || null, mode || 'أونلاين', daily_rate || 0,
       total_days || 1, status || 'مجدولة',
-      institute_id || null, notes || null, req.user.id
+      institute_id || null, notes || null, req.user?.id || null
     ]);
 
-    // نضيف حدث في التقويم تلقائياً
+    const courseId = result.rows[0].id;
+
     await pool.query(`
       INSERT INTO calendar_events (course_id, title, event_date, end_date, color)
-      VALUES (?, ?, ?, ?, '#1D9E75')
-    `, [result.insertId, name, start_date, end_date]);
+      VALUES ($1, $2, $3, $4, $5)
+    `, [courseId, name, start_date, end_date, '#1D9E75']);
 
-    res.status(201).json({ message: 'تمت إضافة الدورة بنجاح', id: result.insertId });
+    res.status(201).json({ message: 'تمت إضافة الدورة بنجاح', id: courseId });
   } catch (err) { next(err); }
 }
 
-// ─────────────────────────────────────────
-// PUT /api/courses/:id — تعديل دورة
-// ─────────────────────────────────────────
 async function update(req, res, next) {
   try {
     const {
@@ -103,88 +100,86 @@ async function update(req, res, next) {
 
     await pool.query(`
       UPDATE courses SET
-        name=?, start_date=?, end_date=?, start_time=?,
-        location=?, mode=?, daily_rate=?, total_days=?,
-        status=?, institute_id=?, notes=?
-      WHERE id=?
+        name = $1,
+        start_date = $2,
+        end_date = $3,
+        start_time = $4,
+        location = $5,
+        mode = $6,
+        daily_rate = $7,
+        total_days = $8,
+        status = $9,
+        institute_id = $10,
+        notes = $11
+      WHERE id = $12
     `, [
       name, start_date, end_date, start_time || null,
-      location, mode, daily_rate, total_days,
+      location || null, mode, daily_rate, total_days,
       status, institute_id || null, notes || null,
       req.params.id
     ]);
 
-    // نحدث حدث التقويم المرتبط
     await pool.query(`
       UPDATE calendar_events
-      SET title=?, event_date=?, end_date=?
-      WHERE course_id=?
+      SET title = $1, event_date = $2, end_date = $3
+      WHERE course_id = $4
     `, [name, start_date, end_date, req.params.id]);
 
     res.json({ message: 'تم تحديث الدورة بنجاح' });
   } catch (err) { next(err); }
 }
 
-// ─────────────────────────────────────────
-// DELETE /api/courses/:id — حذف دورة
-// ─────────────────────────────────────────
 async function remove(req, res, next) {
   try {
-    await pool.query('DELETE FROM courses WHERE id=?', [req.params.id]);
+    await pool.query('DELETE FROM courses WHERE id = $1', [req.params.id]);
     res.json({ message: 'تم حذف الدورة' });
   } catch (err) { next(err); }
 }
 
-// ─────────────────────────────────────────
-// GET /api/courses/stats/dashboard — إحصائيات لوحة التحكم
-// ─────────────────────────────────────────
 async function getDashboardStats(req, res, next) {
   try {
     const year = req.query.year || new Date().getFullYear();
 
-    // إجمالي الدورات حسب الحالة
-    const [statusCounts] = await pool.query(`
+    const statusCounts = await pool.query(`
       SELECT status, COUNT(*) AS count
       FROM courses
-      WHERE YEAR(start_date) = ?
+      WHERE EXTRACT(YEAR FROM start_date) = $1
       GROUP BY status
     `, [year]);
 
-    // إجمالي الأرباح
-    const [revenue] = await pool.query(`
+    const revenue = await pool.query(`
       SELECT COALESCE(SUM(p.amount_paid), 0) AS total_revenue
       FROM payments p
       JOIN courses c ON p.course_id = c.id
-      WHERE YEAR(c.start_date) = ?
+      WHERE EXTRACT(YEAR FROM c.start_date) = $1
     `, [year]);
 
-    // أقرب دورة قادمة
-    const [upcoming] = await pool.query(`
+    const upcoming = await pool.query(`
       SELECT id, name, start_date, location, mode
       FROM courses
-      WHERE start_date >= CURDATE() AND status NOT IN ('ملغية','مكتملة')
+      WHERE start_date >= CURRENT_DATE
+        AND status NOT IN ('ملغية','مكتملة')
       ORDER BY start_date ASC
       LIMIT 1
     `);
 
-    // إحصائيات شهرية (عدد الدورات + الإيرادات)
-    const [monthly] = await pool.query(`
+    const monthly = await pool.query(`
       SELECT
-        MONTH(c.start_date)                    AS month,
-        COUNT(DISTINCT c.id)                   AS courses_count,
-        COALESCE(SUM(p.amount_paid), 0)        AS revenue
+        EXTRACT(MONTH FROM c.start_date) AS month,
+        COUNT(DISTINCT c.id) AS courses_count,
+        COALESCE(SUM(p.amount_paid), 0) AS revenue
       FROM courses c
       LEFT JOIN payments p ON p.course_id = c.id
-      WHERE YEAR(c.start_date) = ?
-      GROUP BY MONTH(c.start_date)
+      WHERE EXTRACT(YEAR FROM c.start_date) = $1
+      GROUP BY EXTRACT(MONTH FROM c.start_date)
       ORDER BY month ASC
     `, [year]);
 
     res.json({
-      status_counts:   statusCounts,
-      total_revenue:   revenue[0]?.total_revenue || 0,
-      upcoming_course: upcoming[0] || null,
-      monthly_stats:   monthly,
+      status_counts: statusCounts.rows,
+      total_revenue: revenue.rows[0]?.total_revenue || 0,
+      upcoming_course: upcoming.rows[0] || null,
+      monthly_stats: monthly.rows,
     });
   } catch (err) { next(err); }
 }

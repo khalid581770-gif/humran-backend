@@ -1,3 +1,33 @@
 
 
 cat > ...
+EOFrequire('dotenv').config();
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+async function changePassword() {
+  const username = 'عمي خالد';
+  const newPassword = '123456';
+
+  const hash = await bcrypt.hash(newPassword, 12);
+
+  await pool.query(
+    'UPDATE users SET password_hash = $1 WHERE username = $2',
+    [hash, username]
+  );
+
+  console.log('✅ تم تغيير كلمة المرور');
+  console.log('اسم المستخدم:', username);
+  console.log('كلمة المرور الجديدة:', newPassword);
+
+  await pool.end();
+}
+
+changePassword().catch((err) => {
+  console.error('❌ خطأ:', err.message);
+  process.exit(1);
